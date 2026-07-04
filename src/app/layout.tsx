@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "SecureReview Demo App",
-  description: "Intentionally vulnerable Next.js app for PR security review demos",
+  title: "Acme Portal",
+  description: "Internal admin tools dashboard",
 };
 
 export default function RootLayout({
