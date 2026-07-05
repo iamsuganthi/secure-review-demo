@@ -48,11 +48,7 @@ echo "==> Pushing ${BRANCH}"
 git push -u origin "$BRANCH" --force-with-lease
 
 echo "==> Opening pull request"
-PR_URL="$(gh pr create \
-  --base "$BASE_BRANCH" \
-  --head "$BRANCH" \
-  --title "test: introduce ${VULN_PACKAGE}@${VULN_VERSION} (${OSV_ID})" \
-  --body "$(cat <<EOF
+PR_BODY="$(cat <<EOF
 ## Summary
 - Adds \`${VULN_PACKAGE}@${VULN_VERSION}\`, a version flagged by OSV as vulnerable to **${OSV_ID}**
 - Includes \`test-suite/create-vuln-pr.sh\` to reproduce this PR on demand
@@ -66,7 +62,48 @@ PR_URL="$(gh pr create \
 - [ ] SecureReview / dependency scan flags lodash
 - [ ] Autofix suggests upgrade to \`>= 4.18.0\`
 EOF
-)")"
+)"
+PR_TITLE="test: introduce ${VULN_PACKAGE}@${VULN_VERSION} (${OSV_ID})"
+COMPARE_URL="https://github.com/$(git remote get-url origin | sed -E 's#.*[:/]([^/]+)/([^/.]+)(\.git)?#\1/\2#')/compare/${BASE_BRANCH}...${BRANCH}?expand=1"
+
+create_pr() {
+  local token="$1"
+  curl -fsS -X POST \
+    -H "Authorization: Bearer ${token}" \
+    -H "Accept: application/vnd.github+json" \
+    -H "X-GitHub-Api-Version: 2022-11-28" \
+    "https://api.github.com/repos/iamsuganthi/secure-review-demo/pulls" \
+    -d "$(node -e "
+      console.log(JSON.stringify({
+        title: process.argv[1],
+        head: process.argv[2],
+        base: process.argv[3],
+        body: process.argv[4],
+      }));
+    " "$PR_TITLE" "$BRANCH" "$BASE_BRANCH" "$PR_BODY")" \
+    | node -e "let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>{const j=JSON.parse(d); if(j.html_url) console.log(j.html_url); else process.exit(1);});"
+}
+
+PR_URL=""
+for token in "${GH_TOKEN:-}" "${GITHUB_TOKEN:-}" "${GITHUB_MCP_PAT:-}"; do
+  if [[ -n "$token" ]] && PR_URL="$(create_pr "$token" 2>/dev/null || true)"; then
+    break
+  fi
+done
+
+if [[ -z "$PR_URL" ]] && command -v gh >/dev/null 2>&1; then
+  PR_URL="$(GH_TOKEN="${GH_TOKEN:-${GITHUB_TOKEN:-${GITHUB_MCP_PAT:-}}}" gh pr create \
+    --base "$BASE_BRANCH" \
+    --head "$BRANCH" \
+    --title "$PR_TITLE" \
+    --body "$PR_BODY" 2>/dev/null || true)"
+fi
 
 echo
-echo "PR created: ${PR_URL}"
+if [[ -n "$PR_URL" ]]; then
+  echo "PR created: ${PR_URL}"
+else
+  echo "Could not create PR automatically (GitHub token needs pull_requests:write)."
+  echo "Finish manually: ${COMPARE_URL}"
+  exit 1
+fi
