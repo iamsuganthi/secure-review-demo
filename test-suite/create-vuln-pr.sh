@@ -6,7 +6,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-BRANCH="test-suite"
+BRANCH="pinned-suite"
 BASE_BRANCH="${BASE_BRANCH:-main}"
 
 # package|version|osv-id
