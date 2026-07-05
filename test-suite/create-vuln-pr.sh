@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Creates branch "test-suite", pins a known-vulnerable lodash version from OSV,
-# pushes to GitHub, and prints a link to open a PR against main.
+# Creates branch "test-suite", pins known-vulnerable npm versions from OSV,
+# adds simple code vulnerabilities, pushes to GitHub, and prints a PR link.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -8,10 +8,12 @@ cd "$ROOT"
 
 BRANCH="test-suite"
 BASE_BRANCH="${BASE_BRANCH:-main}"
-# OSV: https://osv.dev/vulnerability/CVE-2026-2950 — lodash <= 4.17.23
-VULN_PACKAGE="lodash"
-VULN_VERSION="4.17.23"
-OSV_ID="CVE-2026-2950"
+
+# package|version|osv-id
+VULN_PACKAGES=(
+  "lodash|4.17.23|CVE-2026-2950"          # fix available in 4.18.0
+  "request|2.88.2|GHSA-p8p7-x288-28g6"   # no known fix; last npm release is affected
+)
 
 echo "==> Syncing ${BASE_BRANCH} from origin"
 git fetch origin --prune
@@ -28,24 +30,44 @@ fi
 
 git checkout -b "$BRANCH"
 
-echo "==> Adding ${VULN_PACKAGE}@${VULN_VERSION} (${OSV_ID})"
+echo "==> Adding vulnerable dependencies from OSV"
 node -e "
 const fs = require('fs');
-const pkgPath = 'package.json';
-const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+const entries = process.argv.slice(1);
+const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
 pkg.dependencies = pkg.dependencies || {};
-pkg.dependencies['${VULN_PACKAGE}'] = '${VULN_VERSION}';
-fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + '\n');
-"
+for (const entry of entries) {
+  const [name, version] = entry.split('|');
+  pkg.dependencies[name] = version;
+}
+fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
+" "${VULN_PACKAGES[@]}"
 
-npm install "${VULN_PACKAGE}@${VULN_VERSION}" --save-exact
+for entry in "${VULN_PACKAGES[@]}"; do
+  IFS='|' read -r name version _ <<< "$entry"
+  npm install "${name}@${version}" --save-exact
+done
 
-git add package.json package-lock.json test-suite/
+echo "==> Adding code vulnerabilities (SQL injection, BOLA)"
+cp -R test-suite/vuln-files/src/. src/
+
+COMMIT_BODY="Intentionally pins vulnerable npm packages for SecureReview testing:"
+for entry in "${VULN_PACKAGES[@]}"; do
+  IFS='|' read -r name version osv_id <<< "$entry"
+  COMMIT_BODY="${COMMIT_BODY}
+- ${name}@${version} (${osv_id}) https://osv.dev/vulnerability/${osv_id}"
+done
+COMMIT_BODY="${COMMIT_BODY}
+
+Code vulnerabilities:
+- SQL injection (A03): string-built query in src/lib/db/users.ts
+- BOLA (A01): user profile route returns any id without ownership check"
+
+git add package.json package-lock.json test-suite/ src/
 git commit -m "$(cat <<EOF
-test: add ${VULN_PACKAGE}@${VULN_VERSION} for SecureReview demo
+test: add dependency and code vulnerabilities for SecureReview demo
 
-Intentionally pins a version affected by ${OSV_ID} (prototype pollution in
-_.unset / _.omit). See https://osv.dev/vulnerability/${OSV_ID}
+${COMMIT_BODY}
 EOF
 )"
 
