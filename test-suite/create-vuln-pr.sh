@@ -14,13 +14,18 @@ VULN_VERSION="4.17.23"
 OSV_ID="CVE-2026-2950"
 
 echo "==> Syncing ${BASE_BRANCH} from origin"
-git fetch origin
+git fetch origin --prune
 git checkout "$BASE_BRANCH"
 git pull --ff-only origin "$BASE_BRANCH"
 
+echo "==> Deleting existing ${BRANCH} branch (local and remote)"
 if git show-ref --verify --quiet "refs/heads/${BRANCH}"; then
   git branch -D "$BRANCH"
 fi
+if git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
+  git push origin --delete "$BRANCH"
+fi
+
 git checkout -b "$BRANCH"
 
 echo "==> Adding ${VULN_PACKAGE}@${VULN_VERSION} (${OSV_ID})"
